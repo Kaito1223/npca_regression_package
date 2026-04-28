@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "npca-regression"
+version = "0.1.0"
+description = "NPCA regression utilities refactored into a package structure."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "torch",
+]
+
+[project.optional-dependencies]
+examples = [
+    "matplotlib",
+    "openpyxl",
+    "ucimlrepo",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
