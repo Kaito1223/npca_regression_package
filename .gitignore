@@ -1,5 +1,69 @@
-*.egg-info/
+# Python bytecode/cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Package/build artifacts
+*.egg-info/
+.eggs/
 build/
 dist/
+wheels/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test/cache artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Generated experiment outputs
+benchmark_outputs/
+demo_2d_outputs/
+demo_3d_outputs/
+trace_steps/
+trace_frames/
+principal_tree_steps/
+*_outputs/
+
+# Generated figures / animations / result tables
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+*.xlsx
+*.csv
+
+# Model/checkpoint outputs
+*.pt
+*.pth
+*.pkl
+*.joblib
+*.npy
+*.npz
+
+# Local environment variables
+.env
+.env.*
