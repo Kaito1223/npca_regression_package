@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from npca_regression import fit_models, predict
+from npca_regression.kernel import fit_models, predict
 from npca_regression.datasets import make_data_combined
 
 
@@ -19,6 +19,14 @@ kernel_params = {
 knn_params = {
     "k": 8,
     "lambda_knn": 0.0,
+}
+
+torch_params = {
+    "torch_device": "cuda",
+    "lr": 0.05,
+    "steps": 300,
+    "restarts": 1,
+    "init_perturb": 0.1,
 }
 
 Z_train, Z_test = make_data_combined(
@@ -59,8 +67,7 @@ df_test, results_test = predict(
     X_test,
     y_test=y_test,
     batch_size=None,
-    lr=0.05,
-    steps=300,
+    **torch_params,
     **knn_params,
 )
 
@@ -72,8 +79,7 @@ df_grid, results_grid = predict(
     Xq,
     y_test=None,
     batch_size=None,
-    lr=0.05,
-    steps=300,
+    **torch_params,
     **knn_params,
 )
 

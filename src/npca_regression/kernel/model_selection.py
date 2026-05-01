@@ -20,6 +20,9 @@ def evaluate_kernels_with_torch_argmin(
     batch_size: Optional[int] = None,
     lr: np.float64 = 0.05,
     steps: int = 300,
+    torch_device: Optional[str] = None,
+    restarts: int = 1,
+    init_perturb: np.float64 = 0.5,
     **kwargs,
 ):
     """Compatibility helper matching the old evaluation.py call style."""
@@ -40,6 +43,9 @@ def evaluate_kernels_with_torch_argmin(
         batch_size=batch_size,
         lr=lr,
         steps=steps,
+        torch_device=torch_device,
+        restarts=restarts,
+        init_perturb=init_perturb,
     )
 
 __all__ = ["evaluate_kernels_with_torch_argmin"]

@@ -1,4 +1,4 @@
-from .feature_space import (
+from .kernel import (
     fit_models,
     predict,
     evaluate_kernels_with_torch_argmin,

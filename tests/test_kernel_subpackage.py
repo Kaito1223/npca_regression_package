@@ -3,7 +3,7 @@ import pytest
 
 from npca_regression.datasets import make_data_combined
 
-from npca_regression.feature_space import (
+from npca_regression.kernel import (
     rbf_kernel,
     poly_kernel,
     KernelConfig,

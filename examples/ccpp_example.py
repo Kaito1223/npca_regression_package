@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 
-from npca_regression import fit_models, predict
+from npca_regression.kernel import fit_models, predict
 
 PCA_METHOD = 'kernel' # 'kernel' or 'moment'
 EVR_TARGET = 0.99 # Optional float between 0 and 1 to select number of components by EVR threshold, e.g. 0.95. If None, use m-1 directly.
@@ -28,6 +28,15 @@ knn_params = {
     'k': 8,
     'lambda_knn': 0.5
 }
+
+torch_params = {
+    "torch_device": "cuda",
+    "lr": 0.05,
+    "steps": 300,
+    "restarts": 3,
+    "init_perturb": 0.5,
+}
+
 fit_args = kernel_params if PCA_METHOD == 'kernel' else moment_params
 
 #Real dataset example (uncomment to use):
@@ -86,8 +95,7 @@ df_argmin_test, results_test = predict(
     X_test,
     y_test=y_test,
     batch_size=None,
-    lr=0.05,
-    steps=300,
+    **torch_params,
     **knn_params
 )
 

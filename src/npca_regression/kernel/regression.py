@@ -95,14 +95,18 @@ def fit_models(Z_train: Array,
     else:
         raise ValueError(f"Unknown method: {method}")
 
-def predict(models: List[Union[KPCAResult, MomentPolynomialPCA]],
-            X_test: Array,
-            y_test: Optional[Array] = None,
-            k: int = 0,
-            lambda_knn: np.float64 = 0.0,
-            batch_size: Optional[int] = None,
-            lr: np.float64 = 0.05,
-            steps: int = 300) -> pd.DataFrame:
+def predict(
+    models,
+    X_test,
+    y_test=None,
+    k: int = 0,
+    lambda_knn: np.float64 = 0.0,
+    batch_size: Optional[int] = None,
+    lr: np.float64 = 0.05,
+    steps: int = 300,
+    torch_device: Optional[str] = None,
+    restarts: int = 1,
+    init_perturb: np.float64 = 0.5) -> pd.DataFrame:
 
     rows = []
     results = []
@@ -111,7 +115,7 @@ def predict(models: List[Union[KPCAResult, MomentPolynomialPCA]],
         y_pred: Array
         projector: Union[TorchProjector_Kernel, TorchProjector_Moment]
         if isinstance(model, KPCAResult):
-            projector = TorchProjector_Kernel(model, k=k, lambda_knn=lambda_knn)
+            projector = TorchProjector_Kernel(model, k=k, lambda_knn=lambda_knn, device=torch_device)
             kernel_name = model.kernel_cfg.kind
             param_raw = dict(model.kernel_cfg.params)
 
@@ -123,25 +127,25 @@ def predict(models: List[Union[KPCAResult, MomentPolynomialPCA]],
                 param_label = f"degree={degree}, c0={c0:g}"
             else:
                 param_label = str(param_raw)
-            print(f"Predicting with: {kernel_name}, params: {param_label}, k={k}, lambda={lambda_knn}")
+            print(f"Predicting with: {kernel_name}, params: {param_label}, "f"k={k}, lambda={lambda_knn}, device={projector.device}, "f"lr={lr}, steps={steps}, restarts={restarts}")
 
         elif isinstance(model, MomentPolynomialPCA):
-            projector = TorchProjector_Moment(model, k=k, lambda_knn=lambda_knn)
+            projector = TorchProjector_Moment(model, k=k, lambda_knn=lambda_knn, device=torch_device)
             kernel_name = "poly-moment"
             param_raw = {"degree": model.degree, "const": model.const}
             param_label = f"degree={model.degree}, const={model.const:g}"
-            print(f"Predicting with: moment, params: {param_label}, k={k}, lambda={lambda_knn}")
+            print(f"Predicting with: moment, params: {param_label}, k={k}, lambda={lambda_knn}, device={projector.device}, "f"lr={lr}, steps={steps}, restarts={restarts}")
         else:
             raise ValueError(f"Unknown model type for prediction. Model types are: {type(model)}")
         
         if batch_size is None or batch_size >= len(X_test):
-            y_pred = projector.predict_y_batch(X_test, lr=lr, steps=steps)
+            y_pred = projector.predict_y_batch(X_test, lr=lr, steps=steps, restarts=restarts, init_perturb=init_perturb)
         else:
             y_pred_parts = []
             num_samples = len(X_test)
             for i in range(0, num_samples, batch_size):
                 X_batch = X_test[i : i + batch_size]
-                y_pred_batch = projector.predict_y_batch(X_batch, lr=lr, steps=steps)
+                y_pred_batch = projector.predict_y_batch(X_batch, lr=lr, steps=steps, restarts=restarts, init_perturb=init_perturb)
                 y_pred_parts.append(y_pred_batch)
             
             y_pred = np.concatenate(y_pred_parts)
@@ -173,12 +177,24 @@ def predict(models: List[Union[KPCAResult, MomentPolynomialPCA]],
             "m": model.m,
             "RMSE_yhat_vs_y": rmse_y,
             "root_mean_feature": root_mean_residual,
+            "torch_device": str(projector.device),
+            "lr": float(lr),
+            "steps": int(steps),
+            "restarts": int(restarts),
+            "init_perturb": float(init_perturb),
         })
         results.append({
             "kernel": kernel_name,
             'params': param_raw,
             "params_label": param_label,
-            "pred": y_pred
+            "pred": y_pred,
+            "torch": {
+                "device": str(projector.device),
+                "lr": float(lr),
+                "steps": int(steps),
+                "restarts": int(restarts),
+                "init_perturb": float(init_perturb),
+            },
         })
 
     return pd.DataFrame(rows), results  

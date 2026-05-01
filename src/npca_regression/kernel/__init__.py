@@ -1,10 +1,11 @@
-from .kernels import rbf_kernel, poly_kernel
 from .pca import (
     KernelConfig,
     KPCAResult,
     MomentPolynomialPCA,
     center_gram,
     kpca_fit,
+    rbf_kernel,
+    poly_kernel,
 )
 from .regression import fit_models, predict
 from .model_selection import evaluate_kernels_with_torch_argmin
