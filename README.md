@@ -26,20 +26,22 @@ npca_regression_package/
 ├── README.md
 ├── src/
 │   └── npca_regression/
-│       ├── __init__.py
-│       ├── datasets.py
-│       ├── kernels.py
-│       ├── metrics.py
-│       ├── model_selection.py
-│       ├── pca.py
-│       ├── poly_pca.py
-│       ├── projectors.py
-│       ├── regression.py
-│       ├── NPCA_reg_op.py
+│       ├── kernel/
+│           ├── __init__.py
+│           ├── datasets.py
+│           ├── model_selection.py
+│           ├── pca.py
+│           ├── projectors.py
+│           ├── regression.py
 │       └── baselines/
 │           ├── __init__.py
 │           ├── kernel_regression.py
 │           └── spline_smoothing.py
+|       └── neural/
+|           ├── __init__.py
+|           ├── ultis.py
+            ...
+        ...
 ├── examples/
 │   ├── ccpp_example.py
 │   ├── synthetic_2d_example.py
@@ -58,21 +60,6 @@ From the root folder of the project, run:
 ```bash
 python -m pip install -e .
 ```
-
-The `-e` means editable mode. This makes the package importable while still using the files in your current working directory.
-
-After installation, this should work:
-
-```bash
-python -c "import npca_regression; print(npca_regression.__file__)"
-```
-
-The printed path should point to something like:
-
-```text
-.../npca_regression_package/src/npca_regression/__init__.py
-```
-
 ---
 
 ## Basic Usage
@@ -328,22 +315,10 @@ The benchmark script compares NPCA regression against the baseline methods:
 python benchmarks/compare_npca_spline_kernel.py
 ```
 
-The benchmark should use the same train/test split for all methods.
-
-A clean comparison should follow this pattern:
-
 ```python
 X_train, y_train, X_test, y_test = make_data_separated(...)
 
 Z_train = np.column_stack([X_train, y_train])
 ```
-
-Then:
-
-- NPCA uses `Z_train`
-- Kernel regression uses `X_train, y_train`
-- Spline smoothing uses `X_train, y_train`
-
-This keeps the comparison fair.
 
 ---

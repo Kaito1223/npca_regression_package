@@ -31,10 +31,10 @@ def main():
 
     config = NeuralNPCARegressionConfig(
         neural_pca=NeuralPCAConfig(
-            n_components=2,
+            n_components=1,
             block_size=32,
-            step_size=0.05,
-            max_iter=100,
+            step_size=0.01,
+            max_iter=300,
             random_state=0,
         ),
 
@@ -42,11 +42,11 @@ def main():
         #   "grid"            = grid search only
         #   "torch"           = PyTorch gradient descent only
         #   "grid_then_torch" = grid search initialization + PyTorch refinement
-        prediction_optimizer="torch",
+        prediction_optimizer="grid_then_torch",
 
         # Grid initialization
-        # grid_size=61,
-        # refine=False,
+        grid_size=61,
+        refine=False,
 
         # PyTorch gradient-descent refinement
         torch_learning_rate=0.01,
