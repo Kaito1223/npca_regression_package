@@ -106,7 +106,12 @@ def predict(
     steps: int = 300,
     torch_device: Optional[str] = None,
     restarts: int = 1,
-    init_perturb: np.float64 = 0.5) -> pd.DataFrame:
+    init_perturb: np.float64 = 0.5,
+    prediction_optimizer: str = "torch",
+    grid_size: int = 101,
+    grid_refine: bool = True,
+    y_bounds: Optional[tuple[float, float]] = None,
+    y_margin_fraction: np.float64 = 0.15,) -> pd.DataFrame:
 
     rows = []
     results = []
@@ -139,13 +144,13 @@ def predict(
             raise ValueError(f"Unknown model type for prediction. Model types are: {type(model)}")
         
         if batch_size is None or batch_size >= len(X_test):
-            y_pred = projector.predict_y_batch(X_test, lr=lr, steps=steps, restarts=restarts, init_perturb=init_perturb)
+            y_pred = projector.predict_y_batch(X_test, lr=lr, steps=steps, restarts=restarts, init_perturb=init_perturb, prediction_optimizer=prediction_optimizer, grid_size=grid_size, grid_refine=grid_refine, y_bounds=y_bounds, y_margin_fraction=y_margin_fraction)
         else:
             y_pred_parts = []
             num_samples = len(X_test)
             for i in range(0, num_samples, batch_size):
                 X_batch = X_test[i : i + batch_size]
-                y_pred_batch = projector.predict_y_batch(X_batch, lr=lr, steps=steps, restarts=restarts, init_perturb=init_perturb)
+                y_pred_batch = projector.predict_y_batch(X_batch, lr=lr, steps=steps, restarts=restarts, init_perturb=init_perturb, prediction_optimizer=prediction_optimizer, grid_size=grid_size, grid_refine=grid_refine, y_bounds=y_bounds, y_margin_fraction=y_margin_fraction)
                 y_pred_parts.append(y_pred_batch)
             
             y_pred = np.concatenate(y_pred_parts)
@@ -182,6 +187,11 @@ def predict(
             "steps": int(steps),
             "restarts": int(restarts),
             "init_perturb": float(init_perturb),
+            "prediction_optimizer": str(prediction_optimizer),
+            "grid_size": int(grid_size),
+            "grid_refine": bool(grid_refine),
+            "y_bounds": y_bounds,
+            "y_margin_fraction": float(y_margin_fraction),
         })
         results.append({
             "kernel": kernel_name,
@@ -194,6 +204,11 @@ def predict(
                 "steps": int(steps),
                 "restarts": int(restarts),
                 "init_perturb": float(init_perturb),
+                "prediction_optimizer": str(prediction_optimizer),
+                "grid_size": int(grid_size),
+                "grid_refine": bool(grid_refine),
+                "y_bounds": y_bounds,
+                "y_margin_fraction": float(y_margin_fraction),
             },
         })
 

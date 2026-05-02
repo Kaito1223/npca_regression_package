@@ -23,9 +23,13 @@ def evaluate_kernels_with_torch_argmin(
     torch_device: Optional[str] = None,
     restarts: int = 1,
     init_perturb: np.float64 = 0.5,
+    prediction_optimizer: str = "torch",
+    grid_size: int = 101,
+    grid_refine: bool = True,
+    y_bounds: Optional[tuple[float, float]] = None,
+    y_margin_fraction: np.float64 = 0.15,
     **kwargs,
 ):
-    """Compatibility helper matching the old evaluation.py call style."""
     models = fit_models(
         Z_train,
         method=method,
@@ -46,6 +50,11 @@ def evaluate_kernels_with_torch_argmin(
         torch_device=torch_device,
         restarts=restarts,
         init_perturb=init_perturb,
+        prediction_optimizer=prediction_optimizer,
+        grid_size=grid_size,
+        grid_refine=grid_refine,
+        y_bounds=y_bounds,
+        y_margin_fraction=y_margin_fraction,
     )
 
 __all__ = ["evaluate_kernels_with_torch_argmin"]

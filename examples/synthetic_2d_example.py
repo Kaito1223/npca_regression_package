@@ -7,27 +7,31 @@ from npca_regression.datasets import make_data_combined
 
 
 PCA_METHOD = "kernel"
-EVR_TARGET = 0.95
+EVR_TARGET = 0.99
 n_components = None
 
 kernel_params = {
     "kernel_choice": "all",
     "poly_degrees": [2, 3, 4],
     "rbf_sigmas": [0.5, 1.0, 2.0],
-    "constant": 1.0,
+    "constant": 4.0,
 }
 
 knn_params = {
-    "k": 15,
-    "lambda_knn": 0,
+    "k": 8,
+    "lambda_knn": 0.5,
 }
 
 torch_params = {
     "torch_device": "cuda",
-    "lr": 0.01,
-    "steps": 300,
-    "restarts": 1,
-    "init_perturb": 0.5,
+    "prediction_optimizer": "grid_then_torch",
+    "grid_size": 201,
+    "grid_refine": True,
+    "lr": 0.03,
+    "steps": 500,
+    "restarts": 3,
+    "init_perturb": 0.1,
+    "y_margin_fraction": 0.15,
 }
 
 Z_train, Z_test = make_data_combined(

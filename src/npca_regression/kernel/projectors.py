@@ -8,6 +8,74 @@ from .pca import KPCAResult, KernelConfig, MomentPolynomialPCA
 
 Array = np.ndarray
 
+def _validate_prediction_optimizer(name: str) -> str:
+    name = str(name).lower()
+    valid = {"torch", "grid", "grid_then_torch"}
+    if name not in valid:
+        raise ValueError(
+            "prediction_optimizer must be one of: "
+            "'torch', 'grid', 'grid_then_torch'."
+        )
+    return name
+
+
+def _make_y_grid(
+    y_train: torch.Tensor,
+    grid_size: int,
+    margin_fraction: float,
+    y_bounds: Optional[Tuple[float, float]],
+    device: torch.device,
+) -> torch.Tensor:
+    """Make candidate y-grid in the internal/scaled y-space."""
+    grid_size = max(3, int(grid_size))
+
+    if y_bounds is not None:
+        lo, hi = map(float, y_bounds)
+    else:
+        lo = float(torch.min(y_train).detach().cpu())
+        hi = float(torch.max(y_train).detach().cpu())
+
+        width = hi - lo
+        if width <= 0:
+            width = max(abs(lo), 1.0)
+
+        margin = float(margin_fraction) * width
+        lo = lo - margin
+        hi = hi + margin
+
+    if not lo < hi:
+        raise ValueError("y_bounds must satisfy lower < upper.")
+
+    return torch.linspace(
+        lo,
+        hi,
+        grid_size,
+        dtype=torch.float64,
+        device=device,
+    )
+
+
+def _to_internal_y_bounds(
+    y_bounds: Optional[Tuple[float, float]],
+    y_scaler,
+) -> Optional[Tuple[float, float]]:
+    """Convert user-facing y_bounds to scaled internal bounds if y_scaler exists."""
+    if y_bounds is None:
+        return None
+
+    lo, hi = map(float, y_bounds)
+    if not lo < hi:
+        raise ValueError("y_bounds must satisfy lower < upper.")
+
+    if y_scaler is None:
+        return lo, hi
+
+    vals = np.array([[lo], [hi]], dtype=float)
+    vals_scaled = y_scaler.transform(vals).reshape(-1)
+    lo_s, hi_s = float(vals_scaled[0]), float(vals_scaled[1])
+
+    return min(lo_s, hi_s), max(lo_s, hi_s)
+
 def centered_kernel_row(model: KPCAResult, z: Array) -> Tuple[Array, np.float64]:
     """Compute centered kernel row k_c(z) and k_c(z,z) vs training set."""
     Ztr = model.Z_train
@@ -188,70 +256,189 @@ class TorchProjector_Kernel:
         R_knn = self.R_knn_batch(Y, y_neighbors, weights) / self.rknn_scale
         return E_phi + self.lambda_knn * R_knn
 
-    def predict_y_batch(self,
-                        X_np: Array,
-                        y_init: Optional[Array] = None,
-                        lr: np.float64 = 0.05,
-                        steps: int = 300,
-                        restarts: int = 1,
-                        init_perturb: np.float64 = 0.5) -> Array:
-        
-        b = X_np.shape[0]
-        
+    def predict_y_batch(
+        self,
+        X_np: Array,
+        y_init: Optional[Array] = None,
+        lr: np.float64 = 0.05,
+        steps: int = 300,
+        restarts: int = 1,
+        init_perturb: np.float64 = 0.5,
+        prediction_optimizer: str = "torch",
+        grid_size: int = 101,
+        grid_refine: bool = True,
+        y_bounds: Optional[Tuple[float, float]] = None,
+        y_margin_fraction: float = 0.15, ) -> Array:
+        """
+        Predict y by minimizing the kernel/moment NPCA objective.
+
+        prediction_optimizer:
+            "torch":
+                Current behavior. Direct PyTorch gradient descent.
+
+            "grid":
+                Try a grid of y-values and pick the one with lowest loss.
+
+            "grid_then_torch":
+                First grid search, then use the best grid value as initialization
+                for PyTorch gradient descent.
+        """
+        prediction_optimizer = _validate_prediction_optimizer(prediction_optimizer)
+
         if self.x_scaler is not None:
             X_scaled = self.x_scaler.transform(X_np)
         else:
             X_scaled = X_np
-            
-        X = torch.tensor(X_scaled, dtype=torch.float64, device=self.device)
 
-        best_Y = torch.zeros(b, 1, dtype=torch.float64, device=self.device)
-        best_vals = torch.full((b,), np.float64('inf'), dtype=torch.float64, device=self.device)
+        X = torch.tensor(X_scaled, dtype=torch.float64, device=self.device)
+        b = X.shape[0]
 
         with torch.no_grad():
             if self.k > 0 and self.lambda_knn > 0.0:
                 y_neighbors_precomputed, weights_precomputed = self._find_knn_neighbors(X)
             else:
                 y_neighbors_precomputed, weights_precomputed = None, None
-                
-        for r in range(restarts):
-            if y_init is not None:
+
+        y_bounds_internal = _to_internal_y_bounds(y_bounds, self.y_scaler)
+
+        if prediction_optimizer in {"grid", "grid_then_torch"}:
+            y_grid = _make_y_grid(
+                self.ytr,
+                grid_size=grid_size,
+                margin_fraction=y_margin_fraction,
+                y_bounds=y_bounds_internal,
+                device=self.device,
+            )
+
+            best_Y_grid = torch.zeros(b, 1, dtype=torch.float64, device=self.device)
+            best_vals_grid = torch.full(
+                (b,),
+                np.float64("inf"),
+                dtype=torch.float64,
+                device=self.device,
+            )
+
+            with torch.no_grad():
+                for y_value in y_grid:
+                    Y_candidate = torch.full(
+                        (b, 1),
+                        float(y_value),
+                        dtype=torch.float64,
+                        device=self.device,
+                    )
+
+                    current_vals = self.total_loss_batch(
+                        X,
+                        Y_candidate,
+                        y_neighbors_precomputed,
+                        weights_precomputed,
+                    )
+
+                    is_better = current_vals < best_vals_grid
+                    best_vals_grid[is_better] = current_vals[is_better]
+                    best_Y_grid[is_better] = Y_candidate[is_better]
+
+            if prediction_optimizer == "grid" or not grid_refine:
+                y_out = best_Y_grid.squeeze(dim=1).cpu().numpy()
+
                 if self.y_scaler is not None:
-                    y_init_scaled = self.y_scaler.transform(y_init.reshape(-1, 1)).ravel()
+                    y_out = self.y_scaler.inverse_transform(
+                        y_out.reshape(-1, 1)
+                    ).ravel()
+
+                return y_out
+
+            y_init_internal = best_Y_grid.squeeze(dim=1).detach().cpu().numpy()
+
+        else:
+            y_init_internal = None
+
+        best_Y = torch.zeros(b, 1, dtype=torch.float64, device=self.device)
+        best_vals = torch.full(
+            (b,),
+            np.float64("inf"),
+            dtype=torch.float64,
+            device=self.device,
+        )
+
+        restarts = max(1, int(restarts))
+
+        for r in range(restarts):
+            if y_init_internal is not None:
+                base_init = torch.tensor(
+                    y_init_internal,
+                    dtype=torch.float64,
+                    device=self.device,
+                ).view(-1, 1)
+
+            elif y_init is not None:
+                if self.y_scaler is not None:
+                    y_init_scaled = self.y_scaler.transform(
+                        np.asarray(y_init).reshape(-1, 1)
+                    ).ravel()
                 else:
-                    y_init_scaled = y_init
-                base_init = torch.tensor(y_init_scaled, dtype=torch.float64, device=self.device).view(-1, 1)
+                    y_init_scaled = np.asarray(y_init, dtype=float).reshape(-1)
+
+                base_init = torch.tensor(
+                    y_init_scaled,
+                    dtype=torch.float64,
+                    device=self.device,
+                ).view(-1, 1)
+
             else:
-                base_init = torch.full((b, 1), self.mean_y, dtype=torch.float64, device=self.device)
-            
+                base_init = torch.full(
+                    (b, 1),
+                    self.mean_y,
+                    dtype=torch.float64,
+                    device=self.device,
+                )
+
             if restarts > 1:
-                perturbation = torch.randn(b, 1, device=self.device) * init_perturb
+                perturbation = torch.randn(
+                    b,
+                    1,
+                    dtype=torch.float64,
+                    device=self.device,
+                ) * float(init_perturb)
                 Y0 = base_init + perturbation
             else:
                 Y0 = base_init
 
             Y = Y0.clone().detach().requires_grad_(True)
-            opt = torch.optim.AdamW([Y], lr=lr)
+            opt = torch.optim.AdamW([Y], lr=float(lr))
 
-            for _ in range(steps):
+            for _ in range(int(steps)):
                 opt.zero_grad(set_to_none=True)
-                loss = self.total_loss_batch(X, Y, 
-                                             y_neighbors_precomputed, 
-                                             weights_precomputed).sum()
+
+                loss = self.total_loss_batch(
+                    X,
+                    Y,
+                    y_neighbors_precomputed,
+                    weights_precomputed,
+                ).sum()
+
                 loss.backward()
                 opt.step()
 
             with torch.no_grad():
-                current_vals = self.total_loss_batch(X, Y, y_neighbors_precomputed, weights_precomputed)
+                current_vals = self.total_loss_batch(
+                    X,
+                    Y,
+                    y_neighbors_precomputed,
+                    weights_precomputed,
+                )
+
                 is_better = current_vals < best_vals
                 best_vals[is_better] = current_vals[is_better]
                 best_Y[is_better] = Y[is_better]
 
         y_out = best_Y.squeeze(dim=1).cpu().numpy()
-        
+
         if self.y_scaler is not None:
-            y_out = self.y_scaler.inverse_transform(y_out.reshape(-1, 1)).ravel()
-            
+            y_out = self.y_scaler.inverse_transform(
+                y_out.reshape(-1, 1)
+            ).ravel()
+
         return y_out
 
 class TorchProjector_Moment:
@@ -393,68 +580,187 @@ class TorchProjector_Moment:
         R_knn = self.R_knn_batch(Y, y_neighbors, weights) / self.rknn_scale
         return E_phi + self.lambda_knn * R_knn
 
-    def predict_y_batch(self,
-                        X_np: Array,
-                        y_init: Optional[Array] = None,
-                        lr: np.float64 = 0.05,
-                        steps: int = 300,
-                        restarts: int = 1,
-                        init_perturb: np.float64 = 0.5) -> Array:
-        
-        b = X_np.shape[0]
-        
+    def predict_y_batch(
+        self,
+        X_np: Array,
+        y_init: Optional[Array] = None,
+        lr: np.float64 = 0.05,
+        steps: int = 300,
+        restarts: int = 1,
+        init_perturb: np.float64 = 0.5,
+        prediction_optimizer: str = "torch",
+        grid_size: int = 101,
+        grid_refine: bool = True,
+        y_bounds: Optional[Tuple[float, float]] = None,
+        y_margin_fraction: float = 0.15,) -> Array:
+        """
+        Predict y by minimizing the kernel/moment NPCA objective.
+
+        prediction_optimizer:
+            "torch":
+                Current behavior. Direct PyTorch gradient descent.
+
+            "grid":
+                Try a grid of y-values and pick the one with lowest loss.
+
+            "grid_then_torch":
+                First grid search, then use the best grid value as initialization
+                for PyTorch gradient descent.
+        """
+        prediction_optimizer = _validate_prediction_optimizer(prediction_optimizer)
+
         if self.x_scaler is not None:
             X_scaled = self.x_scaler.transform(X_np)
         else:
             X_scaled = X_np
-            
-        X = torch.tensor(X_scaled, dtype=torch.float64, device=self.device)
 
-        best_Y = torch.zeros(b, 1, dtype=torch.float64, device=self.device)
-        best_vals = torch.full((b,), np.float64('inf'), dtype=torch.float64, device=self.device)
+        X = torch.tensor(X_scaled, dtype=torch.float64, device=self.device)
+        b = X.shape[0]
 
         with torch.no_grad():
             if self.k > 0 and self.lambda_knn > 0.0:
                 y_neighbors_precomputed, weights_precomputed = self._find_knn_neighbors(X)
             else:
                 y_neighbors_precomputed, weights_precomputed = None, None
-                
-        for r in range(restarts):
-            if y_init is not None:
+
+        y_bounds_internal = _to_internal_y_bounds(y_bounds, self.y_scaler)
+
+        if prediction_optimizer in {"grid", "grid_then_torch"}:
+            y_grid = _make_y_grid(
+                self.ytr,
+                grid_size=grid_size,
+                margin_fraction=y_margin_fraction,
+                y_bounds=y_bounds_internal,
+                device=self.device,
+            )
+
+            best_Y_grid = torch.zeros(b, 1, dtype=torch.float64, device=self.device)
+            best_vals_grid = torch.full(
+                (b,),
+                np.float64("inf"),
+                dtype=torch.float64,
+                device=self.device,
+            )
+
+            with torch.no_grad():
+                for y_value in y_grid:
+                    Y_candidate = torch.full(
+                        (b, 1),
+                        float(y_value),
+                        dtype=torch.float64,
+                        device=self.device,
+                    )
+
+                    current_vals = self.total_loss_batch(
+                        X,
+                        Y_candidate,
+                        y_neighbors_precomputed,
+                        weights_precomputed,
+                    )
+
+                    is_better = current_vals < best_vals_grid
+                    best_vals_grid[is_better] = current_vals[is_better]
+                    best_Y_grid[is_better] = Y_candidate[is_better]
+
+            if prediction_optimizer == "grid" or not grid_refine:
+                y_out = best_Y_grid.squeeze(dim=1).cpu().numpy()
+
                 if self.y_scaler is not None:
-                    y_init_scaled = self.y_scaler.transform(y_init.reshape(-1, 1)).ravel()
+                    y_out = self.y_scaler.inverse_transform(
+                        y_out.reshape(-1, 1)
+                    ).ravel()
+
+                return y_out
+
+            y_init_internal = best_Y_grid.squeeze(dim=1).detach().cpu().numpy()
+
+        else:
+            y_init_internal = None
+
+        best_Y = torch.zeros(b, 1, dtype=torch.float64, device=self.device)
+        best_vals = torch.full(
+            (b,),
+            np.float64("inf"),
+            dtype=torch.float64,
+            device=self.device,
+        )
+
+        restarts = max(1, int(restarts))
+
+        for r in range(restarts):
+            if y_init_internal is not None:
+                base_init = torch.tensor(
+                    y_init_internal,
+                    dtype=torch.float64,
+                    device=self.device,
+                ).view(-1, 1)
+
+            elif y_init is not None:
+                if self.y_scaler is not None:
+                    y_init_scaled = self.y_scaler.transform(
+                        np.asarray(y_init).reshape(-1, 1)
+                    ).ravel()
                 else:
-                    y_init_scaled = y_init
-                base_init = torch.tensor(y_init_scaled, dtype=torch.float64, device=self.device).view(-1, 1)
+                    y_init_scaled = np.asarray(y_init, dtype=float).reshape(-1)
+
+                base_init = torch.tensor(
+                    y_init_scaled,
+                    dtype=torch.float64,
+                    device=self.device,
+                ).view(-1, 1)
+
             else:
-                base_init = torch.full((b, 1), self.mean_y, dtype=torch.float64, device=self.device)
-            
+                base_init = torch.full(
+                    (b, 1),
+                    self.mean_y,
+                    dtype=torch.float64,
+                    device=self.device,
+                )
+
             if restarts > 1:
-                perturbation = torch.randn(b, 1, device=self.device) * init_perturb
+                perturbation = torch.randn(
+                    b,
+                    1,
+                    dtype=torch.float64,
+                    device=self.device,
+                ) * float(init_perturb)
                 Y0 = base_init + perturbation
             else:
                 Y0 = base_init
 
             Y = Y0.clone().detach().requires_grad_(True)
-            opt = torch.optim.AdamW([Y], lr=lr)
+            opt = torch.optim.AdamW([Y], lr=float(lr))
 
-            for _ in range(steps):
+            for _ in range(int(steps)):
                 opt.zero_grad(set_to_none=True)
-                loss = self.total_loss_batch(X, Y, 
-                                             y_neighbors_precomputed, 
-                                             weights_precomputed).sum()
+
+                loss = self.total_loss_batch(
+                    X,
+                    Y,
+                    y_neighbors_precomputed,
+                    weights_precomputed,
+                ).sum()
+
                 loss.backward()
                 opt.step()
 
             with torch.no_grad():
-                current_vals = self.total_loss_batch(X, Y, y_neighbors_precomputed, weights_precomputed)
+                current_vals = self.total_loss_batch(
+                    X,
+                    Y,
+                    y_neighbors_precomputed,
+                    weights_precomputed,
+                )
+
                 is_better = current_vals < best_vals
                 best_vals[is_better] = current_vals[is_better]
                 best_Y[is_better] = Y[is_better]
 
         y_out = best_Y.squeeze(dim=1).cpu().numpy()
-        
+
         if self.y_scaler is not None:
-            y_out = self.y_scaler.inverse_transform(y_out.reshape(-1, 1)).ravel()
-            
+            y_out = self.y_scaler.inverse_transform(
+                y_out.reshape(-1, 1)
+            ).ravel()
+
         return y_out
