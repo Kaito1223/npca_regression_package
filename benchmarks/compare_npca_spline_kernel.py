@@ -56,7 +56,8 @@ class ModelResult:
     runtime_seconds: float
     root_mean_feature: Optional[float] = None
     y_pred: Optional[Array] = None
-
+    sad: float = np.nan
+    mae: float = np.nan
 
 MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     "feature_npca": {
@@ -141,6 +142,25 @@ def rmse(y_true: Array, y_pred: Array) -> float:
         raise ValueError("y_true and y_pred must have the same shape.")
 
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+
+def sad(y_true: Array, y_pred: Array) -> float:
+    y_true = np.asarray(y_true, dtype=float).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=float).reshape(-1)
+
+    if y_true.shape != y_pred.shape:
+        raise ValueError("y_true and y_pred must have the same shape.")
+
+    return float(np.sum(np.abs(y_true - y_pred)))
+
+
+def mae(y_true: Array, y_pred: Array) -> float:
+    y_true = np.asarray(y_true, dtype=float).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=float).reshape(-1)
+
+    if y_true.shape != y_pred.shape:
+        raise ValueError("y_true and y_pred must have the same shape.")
+
+    return float(np.mean(np.abs(y_true - y_pred)))
 
 
 def compact_params(params: Any, max_len: int = 140) -> str:
@@ -229,6 +249,8 @@ def run_feature_npca(
         runtime_seconds=runtime,
         root_mean_feature=float(best.get("root_mean_feature", np.nan)),
         y_pred=y_pred,
+        sad=float(best["SAD_yhat_vs_y"]),
+        mae=float(best["MAE_yhat_vs_y"]),
     )
 
 
@@ -392,6 +414,8 @@ def run_kernel_regression(
         runtime_seconds=runtime,
         root_mean_feature=None,
         y_pred=y_pred,
+        sad=sad(y_test, y_pred),
+        mae=mae(y_test, y_pred)
     )
 
 
@@ -490,6 +514,8 @@ def run_spline(
         runtime_seconds=runtime,
         root_mean_feature=None,
         y_pred=y_pred,
+        sad=sad(y_test, y_pred),
+        mae=mae(y_test, y_pred)
     )
 
 
@@ -547,6 +573,8 @@ def evaluate_models(
                 "dataset": dataset_id,
                 "model": result.model,
                 "rmse": result.rmse,
+                "sad": result.sad,
+                "mae": result.mae,
                 "root_mean_feature": result.root_mean_feature,
                 "runtime_seconds": result.runtime_seconds,
                 "params": result.params,
@@ -573,6 +601,8 @@ def evaluate_models(
                     "rank",
                     "model",
                     "rmse",
+                    "sad",
+                    "mae",
                     "root_mean_feature",
                     "runtime_seconds",
                     "params",
@@ -590,6 +620,10 @@ def summarize_results(results: pd.DataFrame) -> pd.DataFrame:
             mean_rmse=("rmse", "mean"),
             std_rmse=("rmse", "std"),
             median_rmse=("rmse", "median"),
+            mean_sad=("sad", "mean"),
+            std_sad=("sad", "std"),
+            median_sad=("sad", "median"),
+            mean_mae=("mae", "mean"),
             mean_runtime_seconds=("runtime_seconds", "mean"),
         )
         .sort_values("mean_rmse")

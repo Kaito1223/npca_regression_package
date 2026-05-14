@@ -13,7 +13,7 @@ from .projectors import (
     TorchProjector_Moment,
     kpca_train_rmse_feature,
 )
-
+from ..metrics import rmse, sad, mae
 Array = np.ndarray
 
 def fit_models(Z_train: Array,
@@ -156,9 +156,13 @@ def predict(
             y_pred = np.concatenate(y_pred_parts)
             
         if y_test is not None:
-            rmse_y = np.sqrt(np.float64(np.mean((y_pred - y_test) ** 2)))
+            rmse_y = rmse(y_test, y_pred)
+            sad_y = sad(y_test, y_pred)
+            mae_y = mae(y_test, y_pred)
         else:
             rmse_y = None
+            sad_y = None
+            mae_y = None
 
         with torch.no_grad():
             X_eval = X_test
@@ -181,6 +185,8 @@ def predict(
             "params": param_label,
             "m": model.m,
             "RMSE_yhat_vs_y": rmse_y,
+            "SAD_yhat_vs_y": sad_y,
+            "MAE_yhat_vs_y": mae_y,
             "root_mean_feature": root_mean_residual,
             "torch_device": str(projector.device),
             "lr": float(lr),

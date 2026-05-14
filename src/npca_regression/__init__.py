@@ -18,6 +18,7 @@ from .neural import (
 )
 
 from .datasets import make_data_separated, make_data_combined
+from .metrics import mse, rmse, sad, mae
 
 __all__ = [
     "fit_models",
@@ -35,4 +36,8 @@ __all__ = [
     "evaluate_neural_npca_regression",
     "make_data_separated",
     "make_data_combined",
+    "mse",
+    "rmse",
+    "sad",
+    "mae",
 ]
